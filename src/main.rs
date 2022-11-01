@@ -71,7 +71,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
             eval_times.insert(r.name.clone(), r.evaluation_time);
             let node = promql::parse((&r.query).as_ref(), false).unwrap();
             let deps = get_metic_dependencies(node);
-            graph.insert_many(r.name.clone(), deps);
+            for dep in deps {
+                graph.insert(dep.clone(), r.name.clone());
+            }
         });
 
     println!("{:#?}", graph);
