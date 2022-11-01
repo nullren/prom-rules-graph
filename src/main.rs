@@ -9,9 +9,9 @@ use std::error::Error;
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
 struct Cli {
-    /// Prometheus server endpoint
-    #[clap(short, long, value_parser, default_value = "http://localhost:9090")]
-    prom_endpoint: String,
+    /// Prometheus server endpoint, can provide multiple servers to aggregate together
+    #[clap(short, long, value_parser)]
+    prom_endpoints: Vec<String>,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -55,26 +55,27 @@ pub struct Rule {
 async fn main() -> Result<(), Box<dyn Error>> {
     let args = Cli::parse();
 
-    let rules_url = format!("{}/api/v1/rules", args.prom_endpoint);
-    let resp = reqwest::get(rules_url).await?.text().await?;
-    let rules: Rules = serde_json::from_str(&resp)?;
-
     let mut graph = MultiMap::new();
     let mut eval_times = BTreeMap::new();
 
-    rules
-        .data
-        .groups
-        .iter()
-        .flat_map(|g| g.rules.iter())
-        .for_each(|r| {
-            eval_times.insert(r.name.clone(), r.evaluation_time);
-            let node = promql::parse((&r.query).as_ref(), false).unwrap();
-            let deps = get_metic_dependencies(node);
-            for dep in deps {
-                graph.insert(dep.clone(), r.name.clone());
-            }
-        });
+    for pe in args.prom_endpoints {
+        let rules_url = format!("{}/api/v1/rules", pe);
+        let resp = reqwest::get(rules_url).await?.text().await?;
+        let rules: Rules = serde_json::from_str(&resp)?;
+        rules
+            .data
+            .groups
+            .iter()
+            .flat_map(|g| g.rules.iter())
+            .for_each(|r| {
+                eval_times.insert(r.name.clone(), r.evaluation_time);
+                let node = promql::parse((&r.query).as_ref(), false).unwrap();
+                let deps = get_metic_dependencies(node);
+                for dep in deps {
+                    graph.insert(dep.clone(), r.name.clone());
+                }
+            });
+    }
 
     // dump graph in dot format
     print_dot_digraph(&graph);
