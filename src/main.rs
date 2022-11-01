@@ -1,10 +1,82 @@
+use clap::Parser;
+use multimap::MultiMap;
 use promql::Node;
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::error::Error;
+
+/// Create a graph of metric dependencies from Prometheus recording rules.
+#[derive(Parser, Debug)]
+#[clap(author, version, about, long_about = None)]
+struct Cli {
+    /// Prometheus server endpoint
+    #[clap(short, long, value_parser, default_value = "http://localhost:9090")]
+    prom_endpoint: String,
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Rules {
+    pub status: String,
+    pub data: Data,
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Data {
+    pub groups: Vec<Group>,
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Group {
+    pub name: String,
+    pub file: String,
+    pub rules: Vec<Rule>,
+    pub interval: i64,
+    pub limit: i64,
+    pub evaluation_time: f64,
+    pub last_evaluation: String,
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Rule {
+    pub name: String,
+    pub query: String,
+    pub health: String,
+    pub evaluation_time: f64,
+    pub last_evaluation: String,
+    #[serde(rename = "type")]
+    pub type_field: String,
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let resp = reqwest::get("https://httpbin.org/ip").await?.text().await?;
-    println!("{:#?}", resp);
+    let args = Cli::parse();
+
+    let rules_url = format!("{}/api/v1/rules", args.prom_endpoint);
+    let resp = reqwest::get(rules_url).await?.text().await?;
+    let rules: Rules = serde_json::from_str(&resp)?;
+
+    let mut graph = MultiMap::new();
+    let mut eval_times = BTreeMap::new();
+
+    rules
+        .data
+        .groups
+        .iter()
+        .flat_map(|g| g.rules.iter())
+        .for_each(|r| {
+            eval_times.insert(r.name.clone(), r.evaluation_time);
+            let node = promql::parse((&r.query).as_ref(), false).unwrap();
+            let deps = get_metic_dependencies(node);
+            graph.insert_many(r.name.clone(), deps);
+        });
+
+    println!("{:#?}", graph);
+    println!("{:#?}", eval_times);
+
     Ok(())
 }
 
