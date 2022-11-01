@@ -76,10 +76,22 @@ async fn main() -> Result<(), Box<dyn Error>> {
             }
         });
 
-    println!("{:#?}", graph);
-    println!("{:#?}", eval_times);
+    // dump graph in dot format
+    print_dot_digraph(&graph);
+    // println!("{:#?}", eval_times);
 
     Ok(())
+}
+
+fn print_dot_digraph(graph: &MultiMap<String, String>) {
+    println!("digraph {{");
+    println!("  rankdir=\"LR\";");
+    for (k, v) in graph.iter_all() {
+        for vv in v {
+            println!("  \"{}\" -> \"{}\";", k, vv);
+        }
+    }
+    println!("}}");
 }
 
 fn get_metic_dependencies(n: Node) -> Vec<String> {
